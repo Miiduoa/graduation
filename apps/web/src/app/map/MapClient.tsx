@@ -176,6 +176,8 @@ function MapContent({
   const [category, setCategory] = useState('全部');
   const initialQuery = normalizeCampusClassroomQuery(query);
   const [search, setSearch] = useState(initialQuery);
+  const [classroomRequest, setClassroomRequest] = useState(initialQuery);
+  const [editingClassroom, setEditingClassroom] = useState(false);
   const searchInputRef = useRef<HTMLInputElement>(null);
   const routeHeadingRef = useRef<HTMLHeadingElement>(null);
   const classroomRouteFocusPending = useRef(false);
@@ -269,7 +271,20 @@ function MapContent({
     [school, search, locations],
   );
   const classroomIds = useMemo(() => new Set(classroom.matches.map((place) => place.id)), [classroom]);
-  const classroomLinkActive = Boolean(initialQuery && search === initialQuery);
+  const classroomLinkActive = !editingClassroom && Boolean(classroomRequest && search === classroomRequest);
+  const correctedClassroomQuery = normalizeCampusClassroomQuery(search);
+  function finishClassroomCorrection() {
+    if (!correctedClassroomQuery) return;
+    setClassroomRequest(correctedClassroomQuery);
+    setSearch(correctedClassroomQuery);
+    setEditingClassroom(false);
+    searchInputRef.current?.focus();
+  }
+  function cancelClassroomCorrection() {
+    setSearch(classroomRequest);
+    setEditingClassroom(false);
+    searchInputRef.current?.focus();
+  }
   const filtered = useMemo(() => {
     const matched = locations.filter(
       (location) =>
@@ -634,6 +649,12 @@ function MapContent({
               value={search}
               maxLength={MAX_CAMPUS_CLASSROOM_QUERY_LENGTH}
               onChange={(event) => setSearch(event.target.value)}
+              onKeyDown={(event) => {
+                if (editingClassroom && event.key === 'Enter' && !event.nativeEvent.isComposing) {
+                  event.preventDefault();
+                  finishClassroomCorrection();
+                }
+              }}
             />
           </label>
           <button
@@ -645,6 +666,17 @@ function MapContent({
             {positionStatus === 'loading' ? '取消定位' : myLocation ? '更新定位' : '定位'}
           </button>
         </div>
+        {editingClassroom && (
+          <div className={styles.notice}>
+            <p role="status">輸入正確的教室名稱，再確認以重新查詢教室位置。</p>
+            <div className={styles.actions}>
+              <button className="btn primary" type="button" disabled={!correctedClassroomQuery} onClick={finishClassroomCorrection}>
+                確認教室名稱
+              </button>
+              <button className="btn" type="button" onClick={cancelClassroomCorrection}>取消修改教室</button>
+            </div>
+          </div>
+        )}
         {positionStatus === 'loading' && <p className={styles.note} role="status">正在取得位置，你也可以取消等待並手動選擇起點。</p>}
         {positionStatus === 'cancelled' && <p className={styles.note} role="status">已停止等待定位。你仍可從地點列表指定步行起點。</p>}
         {positionError && <p className={styles.notice} role="alert">{positionError}</p>}
@@ -657,7 +689,7 @@ function MapContent({
       {classroomLinkActive && (
         <section className={`card ${styles.classroom}`} aria-label="教室定位結果">
           <p className={styles.eyebrow}>課表教室</p>
-          <h2>{initialQuery}</h2>
+          <h2>{classroomRequest}</h2>
           {sourcePending ? (
             <p role="status">正在確認地點資料，尚未確認這間教室的位置。</p>
           ) : placeState.source === 'error' ? (
@@ -729,6 +761,7 @@ function MapContent({
           {(placeState.source === 'error' || (placeState.source === 'ready' && (classroom.status !== 'matched' || !classroomPlace))) && (
             <div className={styles.actions}>
               <button className="btn" type="button" onClick={() => {
+                setEditingClassroom(true);
                 searchInputRef.current?.focus();
                 searchInputRef.current?.select();
               }}>
@@ -839,6 +872,7 @@ function MapContent({
           className="btn"
           onClick={() => {
             setSelection('');
+            setEditingClassroom(false);
             setSearch('');
             setCategory('全部');
             setNearbyOnly(false);
@@ -1046,6 +1080,7 @@ function MapContent({
             <button
               className="btn"
               onClick={() => {
+                setEditingClassroom(false);
                 setSearch('');
                 setCategory('全部');
                 setNearbyOnly(false);
