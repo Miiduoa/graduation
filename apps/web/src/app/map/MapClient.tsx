@@ -379,6 +379,26 @@ function MapContent({
     ).values(),
   ];
 
+  const canChooseClassroomOrigin = placeState.source === 'ready' &&
+    !routeStart && !routeEnd && !routeNeedsConfirmation && (!route || routeDraft !== null);
+
+  function chooseClassroomOrigin(candidate: MapLocation) {
+    if (!classroomLinkActive || !canChooseClassroomOrigin || !classroomIds.has(candidate.id)) return;
+    const destination = confirmedRoutePlace(locations, candidate);
+    if (!destination) return;
+    // Ambiguous results require an explicit selection, not a focused deep link.
+    if (classroom.status === 'ambiguous' &&
+        (typeof selection !== 'object' || selection === null || selected?.id !== destination.id)) return;
+    setRouteDraft({ from: null, to: { ...destination } });
+    selectLocation(destination);
+    setSearch('');
+    setCategory('全部');
+    setNearbyOnly(false);
+    setOnlyFavorites(false);
+    setNotice('');
+    searchInputRef.current?.focus();
+  }
+
   function cancelLocate() {
     // getCurrentPosition has no cancellation handle. Revoke its callbacks instead;
     // a late fix must not change the map or become a navigation origin.
@@ -711,18 +731,9 @@ function MapContent({
                 aria-describedby={classroomNoteId} target="_blank" rel="noopener noreferrer">
                 使用 Apple 地圖前往{classroomPlace.name}
               </a>
-              {!routeStart && !routeEnd && !routeNeedsConfirmation && (!route || routeDraft !== null) && (
+              {canChooseClassroomOrigin && (
                 <button className="btn" type="button" aria-describedby={classroomNoteId}
-                  onClick={() => {
-                    setRouteDraft({ from: null, to: { ...classroomPlace } });
-                    selectLocation(classroomPlace);
-                    setSearch('');
-                    setCategory('全部');
-                    setNearbyOnly(false);
-                    setOnlyFavorites(false);
-                    setNotice('');
-                    searchInputRef.current?.focus();
-                  }}>
+                  onClick={() => chooseClassroomOrigin(classroomPlace)}>
                   選擇步行起點
                 </button>
               )}
@@ -744,6 +755,7 @@ function MapContent({
             </div>
           </> : classroom.status === 'ambiguous' ? <>
             <p>有多個相符地點，請核對位置後選擇。</p>
+            <p id={classroomNoteId}>候選地點是建築標記，並非已核實的入口或室內教室；路線由第三方地圖規劃。</p>
             <ul className={styles.classroomCandidates}>
               {classroom.matches.map((place, index) => (
                 <li key={place.id}>
@@ -752,6 +764,13 @@ function MapContent({
                   </button>
                   <p>{[place.description, place.building, place.floor && `樓層：${place.floor}`].filter(Boolean).join(' · ')}</p>
                   <small>座標 {place.lat.toFixed(5)}, {place.lng.toFixed(5)}</small>
+                  {canChooseClassroomOrigin && typeof selection === 'object' && selection !== null &&
+                    selected?.id === place.id && (
+                    <button className="btn" type="button" aria-describedby={classroomNoteId}
+                      onClick={() => chooseClassroomOrigin(place)}>
+                      選擇步行起點
+                    </button>
+                  )}
                 </li>
               ))}
             </ul>
